@@ -45,7 +45,8 @@ export class ScanQueue {
     try {
       if ((scan.phase === 'queued' || scan.phase === 'local') && scan.local_path) await this.indexLocal(scan.id, scan.local_path);
       else if (!scan.local_path) this.db.raw.prepare("UPDATE scans SET local_done=1 WHERE id=?").run(scan.id);
-      await this.indexRemote(scan.id, scan.remote_path);
+      // A failed comparison can be retried without re-listing an already complete remote inventory.
+      if (!scan.remote_done) await this.indexRemote(scan.id, scan.remote_path);
       this.compare(scan.id);
       this.db.raw.prepare("UPDATE scans SET status='complete', phase='complete', completed_at=? WHERE id=?").run(new Date().toISOString(), scan.id);
       this.prune();
@@ -87,17 +88,29 @@ export class ScanQueue {
       this.db.raw.prepare('UPDATE scans SET remote_cursor=?, remote_items=?, remote_bytes=? WHERE id=?').run(cursor, remoteItems, remoteBytes, id);
       if (!page.has_more) break;
     }
-    this.db.raw.prepare("UPDATE scans SET remote_done=1 WHERE id=?").run(id);
+    this.db.raw.prepare("UPDATE scans SET remote_done=1, phase='compare' WHERE id=?").run(id);
   }
   compare(id) {
     const sql = this.db.raw;
     sql.prepare('DELETE FROM discrepancies WHERE scan_id=?').run(id);
-    const add = sql.prepare('INSERT INTO discrepancies(scan_id,category,path,local_kind,remote_kind,local_size,remote_size) VALUES (?,?,?,?,?,?,?)');
     const write = sql.transaction(() => {
-      for (const row of sql.prepare(`SELECT l.display_path path,l.kind local_kind,l.size local_size FROM inventory l LEFT JOIN inventory r ON r.scan_id=l.scan_id AND r.side='remote' AND r.path_key=l.path_key WHERE l.scan_id=? AND l.side='local' AND r.path_key IS NULL`).iterate(id)) add.run(id, 'missing_in_dropbox', row.path, row.local_kind, null, row.local_size, null);
-      for (const row of sql.prepare(`SELECT r.display_path path,r.kind remote_kind,r.size remote_size FROM inventory r LEFT JOIN inventory l ON l.scan_id=r.scan_id AND l.side='local' AND l.path_key=r.path_key WHERE r.scan_id=? AND r.side='remote' AND l.path_key IS NULL`).iterate(id)) add.run(id, 'additional_in_dropbox', row.path, null, row.remote_kind, null, row.remote_size);
-      for (const row of sql.prepare(`SELECT l.display_path path,l.kind local_kind,r.kind remote_kind,l.size local_size,r.size remote_size FROM inventory l JOIN inventory r ON r.scan_id=l.scan_id AND r.side='remote' AND r.path_key=l.path_key WHERE l.scan_id=? AND l.side='local' AND l.kind<>r.kind`).iterate(id)) add.run(id, 'type_conflict', row.path, row.local_kind, row.remote_kind, row.local_size, row.remote_size);
-      for (const row of sql.prepare(`SELECT l.display_path path,l.kind local_kind,r.kind remote_kind,l.size local_size,r.size remote_size FROM inventory l JOIN inventory r ON r.scan_id=l.scan_id AND r.side='remote' AND r.path_key=l.path_key WHERE l.scan_id=? AND l.side='local' AND l.kind='file' AND l.size<>r.size`).iterate(id)) add.run(id, 'size_mismatch', row.path, row.local_kind, row.remote_kind, row.local_size, row.remote_size);
+      // Set-based writes avoid keeping a SELECT iterator open while inserting on the same connection.
+      sql.prepare(`INSERT INTO discrepancies(scan_id,category,path,local_kind,remote_kind,local_size,remote_size)
+        SELECT l.scan_id, 'missing_in_dropbox', l.display_path, l.kind, NULL, l.size, NULL
+        FROM inventory l LEFT JOIN inventory r ON r.scan_id=l.scan_id AND r.side='remote' AND r.path_key=l.path_key
+        WHERE l.scan_id=? AND l.side='local' AND r.path_key IS NULL`).run(id);
+      sql.prepare(`INSERT INTO discrepancies(scan_id,category,path,local_kind,remote_kind,local_size,remote_size)
+        SELECT r.scan_id, 'additional_in_dropbox', r.display_path, NULL, r.kind, NULL, r.size
+        FROM inventory r LEFT JOIN inventory l ON l.scan_id=r.scan_id AND l.side='local' AND l.path_key=r.path_key
+        WHERE r.scan_id=? AND r.side='remote' AND l.path_key IS NULL`).run(id);
+      sql.prepare(`INSERT INTO discrepancies(scan_id,category,path,local_kind,remote_kind,local_size,remote_size)
+        SELECT l.scan_id, 'type_conflict', l.display_path, l.kind, r.kind, l.size, r.size
+        FROM inventory l JOIN inventory r ON r.scan_id=l.scan_id AND r.side='remote' AND r.path_key=l.path_key
+        WHERE l.scan_id=? AND l.side='local' AND l.kind<>r.kind`).run(id);
+      sql.prepare(`INSERT INTO discrepancies(scan_id,category,path,local_kind,remote_kind,local_size,remote_size)
+        SELECT l.scan_id, 'size_mismatch', l.display_path, l.kind, r.kind, l.size, r.size
+        FROM inventory l JOIN inventory r ON r.scan_id=l.scan_id AND r.side='remote' AND r.path_key=l.path_key
+        WHERE l.scan_id=? AND l.side='local' AND l.kind='file' AND l.size<>r.size`).run(id);
     }); write();
   }
   prune() { const limit = Number(this.db.getSetting('history_limit') || 5); const ids = this.db.raw.prepare("SELECT id FROM scans WHERE status='complete' ORDER BY completed_at DESC LIMIT -1 OFFSET ?").all(limit).map(x => x.id); if (!ids.length) return; const qs = ids.map(() => '?').join(','); this.db.raw.prepare(`DELETE FROM inventory WHERE scan_id IN (${qs})`).run(...ids); this.db.raw.prepare(`DELETE FROM discrepancies WHERE scan_id IN (${qs})`).run(...ids); this.db.raw.prepare(`DELETE FROM scans WHERE id IN (${qs})`).run(...ids); }
