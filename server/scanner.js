@@ -27,7 +27,7 @@ export class ScanQueue {
     const side = query.side === 'remote' ? 'remote' : query.side === 'local' ? 'local' : null;
     if (!side) throw new Error('Choose a valid browser side.');
     const rawPath = typeof query.path === 'string' ? query.path.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '') : '';
-    if (rawPath.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Invalid folder path.');
+    if (rawPath && rawPath.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Invalid folder path.');
     const pathKey = rawPath.toLocaleLowerCase(); const prefix = pathKey ? `${pathKey}/` : '';
     const page = Math.max(0, Number(query.page || 0)); const limit = Math.min(500, Math.max(25, Number(query.limit || 200)));
     const directChildClause = prefix ? 'instr(substr(i.path_key, ?), \'/\') = 0' : "instr(i.path_key, '/') = 0";
