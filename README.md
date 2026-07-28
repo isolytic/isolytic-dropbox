@@ -33,6 +33,7 @@ Dropbox may expire or revoke generated tokens. If that happens, generate and pas
 - Timestamps and file contents are ignored. Missing entries, additional entries, file/folder conflicts, and same-path file-size differences are reported.
 - Symlinks and junctions are not followed. Any local read or Dropbox API failure leaves that scan **Incomplete**, not matched.
 - History retention defaults to five completed scans and can be changed in Settings.
+- Each completed project has a side-by-side **Browse** view. It navigates the saved scan inventory folder-by-folder, so it does not rescan the vault or make Dropbox calls.
 
 ## Local development
 

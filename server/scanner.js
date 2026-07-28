@@ -23,6 +23,25 @@ export class ScanQueue {
     const counts = this.db.raw.prepare('SELECT category, COUNT(*) count FROM discrepancies WHERE scan_id=? GROUP BY category').all(id);
     return { rows, counts, page, limit };
   }
+  browse(id, query) {
+    const side = query.side === 'remote' ? 'remote' : query.side === 'local' ? 'local' : null;
+    if (!side) throw new Error('Choose a valid browser side.');
+    const rawPath = typeof query.path === 'string' ? query.path.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '') : '';
+    if (rawPath.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Invalid folder path.');
+    const pathKey = rawPath.toLocaleLowerCase(); const prefix = pathKey ? `${pathKey}/` : '';
+    const page = Math.max(0, Number(query.page || 0)); const limit = Math.min(500, Math.max(25, Number(query.limit || 200)));
+    const directChildClause = prefix ? 'instr(substr(i.path_key, ?), \'/\') = 0' : "instr(i.path_key, '/') = 0";
+    const args = prefix ? [id, side, `${prefix}%`, prefix.length + 1, limit + 1, page * limit] : [id, side, '%', limit + 1, page * limit];
+    const rows = this.db.raw.prepare(`SELECT i.display_path, i.kind, i.size,
+      (SELECT group_concat(category, ',') FROM discrepancies d WHERE d.scan_id=i.scan_id AND lower(d.path)=i.path_key) categories
+      FROM inventory i WHERE i.scan_id=? AND i.side=? AND i.path_key LIKE ? AND ${directChildClause}
+      ORDER BY CASE i.kind WHEN 'folder' THEN 0 ELSE 1 END, i.path_key LIMIT ? OFFSET ?`).all(...args);
+    const hasMore = rows.length > limit; const entries = rows.slice(0, limit).map(row => ({
+      name: prefix ? row.display_path.slice(prefix.length) : row.display_path,
+      kind: row.kind, size: row.size, categories: row.categories ? row.categories.split(',') : []
+    }));
+    return { side, path: rawPath, entries, page, limit, hasMore };
+  }
   async enqueue(names) {
     if (!this.db.getSetting('dropbox_access_token')) throw new Error('Connect Dropbox before scanning.');
     const all = await this.projects(); let chosen = Array.isArray(names) && names.length ? all.filter(p => names.includes(p.name)) : all;

@@ -75,6 +75,9 @@ app.get('/api/scans', (_req, res) => res.json(scans.list()));
 app.post('/api/queue/pause', (_req, res) => { scans.pause(); res.json({ paused: true }); });
 app.post('/api/queue/resume', (_req, res) => { scans.resumeQueue(); res.json({ paused: false }); });
 app.get('/api/scans/:id/discrepancies', (req, res) => res.json(scans.discrepancies(Number(req.params.id), req.query)));
+app.get('/api/scans/:id/browser', (req, res) => {
+  try { res.json(scans.browse(Number(req.params.id), req.query)); } catch (error) { res.status(400).json({ error: error.message }); }
+});
 app.post('/api/scans', async (req, res) => {
   try { res.status(202).json(await scans.enqueue(req.body.projectNames)); } catch (error) { res.status(400).json({ error: error.message }); }
 });
