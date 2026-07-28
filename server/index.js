@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createDb } from './store.js';
 import { ScanQueue } from './scanner.js';
@@ -13,11 +14,12 @@ const dataDir = process.env.DATA_DIR || '/data';
 const db = createDb(dataDir);
 const dropbox = new DropboxClient(db);
 const scans = new ScanQueue({ db, dropbox, vaultRoot });
+let healthCache = null;
 
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/status', async (_req, res) => {
-  res.json({ configured: Boolean(db.getSetting('dropbox_access_token')), vaultRoot, connected: Boolean(db.getSetting('dropbox_access_token')), queuePaused: db.getSetting('queue_paused') === 'true' });
+  res.json({ configured: Boolean(db.getSetting('dropbox_access_token')), vaultRoot, connected: Boolean(db.getSetting('dropbox_access_token')), queuePaused: db.getSetting('queue_paused') === 'true', health: await connectionHealth() });
 });
 
 app.get('/api/settings', (_req, res) => res.json({
@@ -33,6 +35,7 @@ app.put('/api/settings', (req, res) => {
   if (typeof appKey === 'string') db.setSetting('dropbox_app_key', appKey.trim());
   if (typeof remoteRoot === 'string') db.setSetting('dropbox_remote_root', normalizeRemote(remoteRoot));
   if (Number.isInteger(historyLimit) && historyLimit >= 1 && historyLimit <= 100) db.setSetting('history_limit', String(historyLimit));
+  healthCache = null;
   res.json({ ok: true });
 });
 
@@ -46,6 +49,7 @@ app.post('/api/dropbox/access-token', async (req, res) => {
     db.deleteSetting('dropbox_refresh_token');
     db.setSetting('dropbox_remote_root', remoteRoot);
     if (Number.isInteger(req.body.historyLimit) && req.body.historyLimit >= 1 && req.body.historyLimit <= 100) db.setSetting('history_limit', String(req.body.historyLimit));
+    healthCache = null;
     res.json({ ok: true });
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
@@ -102,6 +106,21 @@ app.get('*splat', (_req, res) => res.sendFile(path.join(__dirname, '..', 'dist',
 
 function requestOrigin(req) { return `${req.protocol}://${req.get('host')}`; }
 function normalizeRemote(value) { const clean = value.trim().replaceAll('\\', '/').replace(/^\/+|\/+$/g, ''); return clean ? `/${clean}` : ''; }
+async function connectionHealth() {
+  if (healthCache && healthCache.expiresAt > Date.now()) return healthCache.value;
+  const vault = await (async () => {
+    try { const stat = await fs.stat(vaultRoot); if (!stat.isDirectory()) throw new Error('Mount is not a directory.'); await fs.access(vaultRoot, fs.constants.R_OK); return { state: 'ready', detail: 'Read-only vault mount is accessible.' }; }
+    catch (error) { return { state: 'error', detail: error.message }; }
+  })();
+  const accessToken = db.getSetting('dropbox_access_token');
+  const dropboxHealth = !accessToken ? { state: 'unconfigured', detail: 'Paste a generated Dropbox access token.' } : await (async () => {
+    try { await dropbox.validateAccessToken(accessToken, db.getSetting('dropbox_remote_root') || ''); return { state: 'ready', detail: 'Access token and selected root are accessible.' }; }
+    catch (error) { return { state: 'error', detail: error.message }; }
+  })();
+  const value = { vault, dropbox: dropboxHealth, checkedAt: new Date().toISOString() };
+  healthCache = { value, expiresAt: Date.now() + 60_000 };
+  return value;
+}
 
 app.listen(port, () => console.log(`Vault Compare listening on ${port}`));
 scans.resume();
