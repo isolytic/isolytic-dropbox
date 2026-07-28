@@ -36,6 +36,20 @@ app.put('/api/settings', (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/dropbox/access-token', async (req, res) => {
+  try {
+    const accessToken = typeof req.body.accessToken === 'string' ? req.body.accessToken.trim() : '';
+    const remoteRoot = normalizeRemote(req.body.remoteRoot || '');
+    if (!accessToken) throw new Error('Paste a generated Dropbox access token.');
+    await dropbox.validateAccessToken(accessToken, remoteRoot);
+    db.setSetting('dropbox_access_token', accessToken);
+    db.deleteSetting('dropbox_refresh_token');
+    db.setSetting('dropbox_remote_root', remoteRoot);
+    if (Number.isInteger(req.body.historyLimit) && req.body.historyLimit >= 1 && req.body.historyLimit <= 100) db.setSetting('history_limit', String(req.body.historyLimit));
+    res.json({ ok: true });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+
 app.get('/api/auth/dropbox/start', (req, res) => {
   const appKey = db.getSetting('dropbox_app_key');
   if (!appKey) return res.status(400).json({ error: 'Save your Dropbox App Key first.' });

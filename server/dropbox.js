@@ -25,6 +25,16 @@ export class DropboxClient {
     this.db.setSetting('dropbox_access_token', data.access_token);
     if (data.refresh_token) this.db.setSetting('dropbox_refresh_token', data.refresh_token);
   }
+  async validateAccessToken(accessToken, remotePath) {
+    const response = await fetch(`${API_URL}/files/list_folder`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: remotePath || '', recursive: false, include_deleted: false, include_mounted_folders: true })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error_summary || 'Dropbox rejected the access token or folder path.');
+    return data;
+  }
   async api(endpoint, payload) {
     let refreshed = false;
     for (let attempt = 0; attempt < 8; attempt++) {

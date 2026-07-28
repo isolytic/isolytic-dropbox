@@ -21,11 +21,9 @@ Portainer pulls the published image; no `.env` file or Portainer environment var
 
 ## First-time Dropbox setup
 
-The setup page links to the Dropbox App Console. Create a scoped app with **Full Dropbox** access and enable only the read scopes it needs (`files.metadata.read`). Add the exact redirect URI shown by the app, normally:
+The setup page uses a generated Dropbox access token—there is no OAuth browser redirect. In the [Dropbox App Console](https://www.dropbox.com/developers/apps), create a **Full Dropbox** app, enable the `files.metadata.read` scope, and click **Generate** in its OAuth 2 section. Paste that token and the Dropbox mirror root into the app; it validates both before saving them. The Settings dialog can export/import a copy-paste connection bundle between local and production instances; it contains credentials, so handle it as you would a password.
 
-`http://localhost:3000/api/auth/dropbox/callback`
-
-Paste the App Key, choose the Dropbox mirror root, then connect. The app uses OAuth PKCE with offline access, so scans can run after the browser closes. The Settings dialog can export/import a copy-paste connection bundle between local and production instances; it contains credentials, so handle it as you would a password.
+Dropbox may expire or revoke generated tokens. If that happens, generate and paste a replacement token in Settings before the next scan.
 
 ## Scan behavior
 
