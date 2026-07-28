@@ -5,7 +5,8 @@ services:
     # Published by .github/workflows/publish-image.yml on every main-branch push.
     image: ghcr.io/isolytic/isolytic-dropbox:latest
     ports:
-      - "3000:3000"
+      # Set APP_PORT in Portainer's stack environment variables (defaults to 3000).
+      - "${APP_PORT:-3000}:3000"
     volumes:
       # Never remove :ro — this is the container's only view of the vault.
       - "${VAULT_HOST_PATH:-/mnt/vault}:/vault:ro"

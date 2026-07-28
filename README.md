@@ -12,10 +12,10 @@ A local, read-only dashboard for verifying that each project below `T:\vault` ex
 
 ## Deploy as a Portainer stack
 
-1. In the stack's **Environment variables** section, set `VAULT_HOST_PATH` to the vault path on the machine running Portainer (for example, `T:/vault` on Docker Desktop for Windows or `/mnt/vault` on Linux). This is the only deployment-level setting; it is entered in Portainer, not stored in a `.env` file. Keep the `/vault:ro` destination and read-only suffix unchanged.
+1. In the stack's **Environment variables** section, set `VAULT_HOST_PATH` to the vault path on the machine running Portainer (for example, `T:/vault` on Docker Desktop for Windows or `/mnt/vault` on Linux). Optionally set `APP_PORT` to the external port you want to use; it defaults to `3000`. These are entered in Portainer, not stored in a `.env` file. Keep the `/vault:ro` destination and read-only suffix unchanged.
 2. In Portainer, choose **Stacks → Add stack → Repository**.
 3. Use repository URL `https://github.com/isolytic/isolytic-dropbox.git`, select the default branch, and set the compose path to `docker-compose.portainer.yml`.
-4. Deploy the stack and open `http://<portainer-host>:3000`.
+4. Deploy the stack and open `http://<portainer-host>:<APP_PORT>`.
 
 Portainer pulls the published image; no `.env` file or Portainer environment variables are required. Configuration and Dropbox login remain inside the app UI. The named `vault_compare_data` volume persists settings and scan history across redeployments.
 
