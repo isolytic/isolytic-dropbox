@@ -34,7 +34,7 @@ export class ScanQueue {
     const args = prefix ? [id, side, `${prefix}%`, prefix.length + 1, limit + 1, page * limit] : [id, side, '%', limit + 1, page * limit];
     const rows = this.db.raw.prepare(`SELECT i.display_path, i.kind, i.size,
       (SELECT group_concat(category, ',') FROM discrepancies d WHERE d.scan_id=i.scan_id AND lower(d.path)=i.path_key) categories
-      FROM inventory i WHERE i.scan_id=? AND i.side=? AND i.path_key LIKE ? AND ${directChildClause}
+      FROM inventory i WHERE i.scan_id=? AND i.side=? AND i.path_key <> '' AND i.path_key LIKE ? AND ${directChildClause}
       ORDER BY CASE i.kind WHEN 'folder' THEN 0 ELSE 1 END, i.path_key LIMIT ? OFFSET ?`).all(...args);
     const hasMore = rows.length > limit; const entries = rows.slice(0, limit).map(row => ({
       name: prefix ? row.display_path.slice(prefix.length) : row.display_path,
