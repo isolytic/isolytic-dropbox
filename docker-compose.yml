@@ -1,0 +1,13 @@
+services:
+  vault-compare:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # Deliberately read-only: the app cannot alter your vault.
+      - "T:/vault:/vault:ro"
+      - vault_compare_data:/data
+    restart: unless-stopped
+
+volumes:
+  vault_compare_data:

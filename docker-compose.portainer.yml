@@ -1,0 +1,16 @@
+# Portainer Git-stack compose file. Change only the source side of the first bind mount
+# if the vault is stored elsewhere on the Portainer host.
+services:
+  vault-compare:
+    # Published by .github/workflows/publish-image.yml on every main-branch push.
+    image: ghcr.io/isolytic/isolytic-dropbox:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      # Never remove :ro — this is the container's only view of the vault.
+      - "/mnt/vault:/vault:ro"
+      - vault_compare_data:/data
+    restart: unless-stopped
+
+volumes:
+  vault_compare_data:
