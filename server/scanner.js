@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+class ScanPaused extends Error { constructor() { super('Scan paused'); } }
+
 export class ScanQueue {
   constructor({ db, dropbox, vaultRoot }) { this.db = db; this.dropbox = dropbox; this.vaultRoot = vaultRoot; this.running = false; }
   async projects() {
@@ -35,22 +37,35 @@ export class ScanQueue {
     this.db.raw.prepare("UPDATE scans SET status='queued', phase=CASE WHEN phase='remote' THEN 'remote' ELSE 'queued', error=NULL WHERE id=?").run(id); this.run(); return { ok: true };
   }
   resume() { this.db.raw.prepare("UPDATE scans SET status='queued', resumed=1 WHERE status='running'").run(); this.run(); }
+  pause() { this.db.setSetting('queue_paused', 'true'); }
+  resumeQueue() {
+    this.db.setSetting('queue_paused', 'false');
+    this.db.raw.prepare("UPDATE scans SET status='queued', resumed=1 WHERE status='paused'").run();
+    this.run();
+  }
+  isPaused() { return this.db.getSetting('queue_paused') === 'true'; }
+  assertNotPaused() { if (this.isPaused()) throw new ScanPaused(); }
   async run() {
     if (this.running) return; this.running = true;
-    try { while (true) { const scan = this.db.raw.prepare("SELECT * FROM scans WHERE status='queued' ORDER BY id LIMIT 1").get(); if (!scan) break; await this.execute(scan); } }
+    try { while (!this.isPaused()) { const scan = this.db.raw.prepare("SELECT * FROM scans WHERE status='queued' ORDER BY id LIMIT 1").get(); if (!scan) break; await this.execute(scan); } }
     finally { this.running = false; }
   }
   async execute(scan) {
-    this.db.raw.prepare("UPDATE scans SET status='running', started_at=COALESCE(started_at,?), error=NULL WHERE id=?").run(new Date().toISOString(), scan.id);
     try {
+      this.assertNotPaused();
+      this.db.raw.prepare("UPDATE scans SET status='running', started_at=COALESCE(started_at,?), error=NULL WHERE id=?").run(new Date().toISOString(), scan.id);
       if ((scan.phase === 'queued' || scan.phase === 'local') && scan.local_path) await this.indexLocal(scan.id, scan.local_path);
       else if (!scan.local_path) this.db.raw.prepare("UPDATE scans SET local_done=1 WHERE id=?").run(scan.id);
       // A failed comparison can be retried without re-listing an already complete remote inventory.
       if (!scan.remote_done) await this.indexRemote(scan.id, scan.remote_path);
+      this.assertNotPaused();
       this.compare(scan.id);
       this.db.raw.prepare("UPDATE scans SET status='complete', phase='complete', completed_at=? WHERE id=?").run(new Date().toISOString(), scan.id);
       this.prune();
-    } catch (error) { this.db.raw.prepare("UPDATE scans SET status='incomplete', error=? WHERE id=?").run(error.message, scan.id); }
+    } catch (error) {
+      if (error instanceof ScanPaused) this.db.raw.prepare("UPDATE scans SET status='paused' WHERE id=?").run(scan.id);
+      else this.db.raw.prepare("UPDATE scans SET status='incomplete', error=? WHERE id=?").run(error.message, scan.id);
+    }
   }
   async indexLocal(id, root) {
     this.db.raw.prepare("UPDATE scans SET phase='local', local_items=0, local_bytes=0, local_done=0 WHERE id=?").run(id);
@@ -61,9 +76,9 @@ export class ScanQueue {
     for await (const item of walk(root)) {
       const rel = item.relative.replaceAll('\\', '/'); const key = rel.toLocaleLowerCase();
       batch.push([id, 'local', key, rel, item.kind, item.size]); items++; bytes += item.size;
-      if (batch.length >= 1000) flush();
+      if (batch.length >= 1000) { flush(); this.assertNotPaused(); }
     }
-    flush(); this.db.raw.prepare("UPDATE scans SET local_done=1 WHERE id=?").run(id);
+    flush(); this.assertNotPaused(); this.db.raw.prepare("UPDATE scans SET local_done=1 WHERE id=?").run(id);
   }
   async indexRemote(id, remotePath) {
     let scan = this.db.raw.prepare('SELECT * FROM scans WHERE id=?').get(id);
@@ -72,6 +87,7 @@ export class ScanQueue {
     let cursor = scan.remote_cursor; let remoteItems = scan.remote_items; let remoteBytes = scan.remote_bytes;
     if (!cursor) { this.db.raw.prepare("DELETE FROM inventory WHERE scan_id=? AND side='remote'").run(id); remoteItems = 0; remoteBytes = 0; }
     while (true) {
+      this.assertNotPaused();
       let page;
       try { page = cursor ? await this.dropbox.api('/files/list_folder/continue', { cursor }) : await this.dropbox.api('/files/list_folder', { path: remotePath || '', recursive: true, include_deleted: false, include_mounted_folders: true }); }
       catch (error) {

@@ -17,7 +17,7 @@ const scans = new ScanQueue({ db, dropbox, vaultRoot });
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/status', async (_req, res) => {
-  res.json({ configured: Boolean(db.getSetting('dropbox_app_key') && db.getSetting('dropbox_access_token')), vaultRoot, connected: Boolean(db.getSetting('dropbox_access_token')) });
+  res.json({ configured: Boolean(db.getSetting('dropbox_access_token')), vaultRoot, connected: Boolean(db.getSetting('dropbox_access_token')), queuePaused: db.getSetting('queue_paused') === 'true' });
 });
 
 app.get('/api/settings', (_req, res) => res.json({
@@ -72,6 +72,8 @@ app.get('/api/projects', async (_req, res) => {
   try { res.json(await scans.projects()); } catch (error) { res.status(500).json({ error: error.message }); }
 });
 app.get('/api/scans', (_req, res) => res.json(scans.list()));
+app.post('/api/queue/pause', (_req, res) => { scans.pause(); res.json({ paused: true }); });
+app.post('/api/queue/resume', (_req, res) => { scans.resumeQueue(); res.json({ paused: false }); });
 app.get('/api/scans/:id/discrepancies', (req, res) => res.json(scans.discrepancies(Number(req.params.id), req.query)));
 app.post('/api/scans', async (req, res) => {
   try { res.status(202).json(await scans.enqueue(req.body.projectNames)); } catch (error) { res.status(400).json({ error: error.message }); }
