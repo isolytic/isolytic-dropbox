@@ -117,9 +117,20 @@ async function connectionHealth() {
     try { await dropbox.validateAccessToken(accessToken, db.getSetting('dropbox_remote_root') || ''); return { state: 'ready', detail: 'Access token and selected root are accessible.' }; }
     catch (error) { return { state: 'error', detail: error.message }; }
   })();
-  const value = { vault, dropbox: dropboxHealth, checkedAt: new Date().toISOString() };
+  const value = { vault, dropbox: dropboxHealth, stats: scanStats(), checkedAt: new Date().toISOString() };
   healthCache = { value, expiresAt: Date.now() + 60_000 };
   return value;
+}
+function scanStats() {
+  const row = db.raw.prepare(`SELECT COUNT(*) project_count,
+    COALESCE(SUM(local_items), 0) local_items, COALESCE(SUM(local_bytes), 0) local_bytes,
+    COALESCE(SUM(remote_items), 0) remote_items, COALESCE(SUM(remote_bytes), 0) remote_bytes
+    FROM scans WHERE id IN (SELECT MAX(id) FROM scans WHERE status='complete' GROUP BY project_name)`).get();
+  return {
+    projects: row.project_count,
+    vault: { items: row.local_items, bytes: row.local_bytes },
+    dropbox: { items: row.remote_items, bytes: row.remote_bytes }
+  };
 }
 
 app.listen(port, () => console.log(`Vault Compare listening on ${port}`));
