@@ -49,6 +49,7 @@ app.get('/api/auth/dropbox/callback', async (req, res) => {
     await dropbox.completeAuth({ code: req.query.code, state: req.query.state, redirectUri: `${requestOrigin(req)}/api/auth/dropbox/callback` });
     res.redirect('/?dropbox=connected');
   } catch (error) {
+    console.warn(`Dropbox OAuth callback failed: ${error.message}`);
     res.redirect(`/?dropbox=error&message=${encodeURIComponent(error.message)}`);
   }
 });

@@ -8,6 +8,13 @@ const APP_VERSION = __APP_VERSION__;
 function App() {
   const [settings, setSettings] = useState(null); const [scans, setScans] = useState([]); const [projects, setProjects] = useState([]); const [search, setSearch] = useState(''); const [detail, setDetail] = useState(null); const [busy, setBusy] = useState(false); const [message, setMessage] = useState('');
   const load = async () => { const [s, x, p] = await Promise.all([get('/api/settings'), get('/api/scans'), get('/api/projects').catch(() => [])]); setSettings(s); setScans(x); setProjects(p); };
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('dropbox') === 'error') {
+      setMessage(params.get('message') || 'Dropbox connection was not completed.');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
   useEffect(() => { load(); const timer = setInterval(load, 3000); return () => clearInterval(timer); }, []);
   const visible = useMemo(() => scans.filter(s => s.project_name.toLowerCase().includes(search.toLowerCase())), [scans, search]);
   const needsAttention = visible.filter(s => !s.remote_only && (classify(s) === 'attention' || s.status === 'incomplete')); const remoteOnly = visible.filter(s => s.remote_only); const good = visible.filter(s => !s.remote_only && classify(s) !== 'attention' && s.status !== 'incomplete');
